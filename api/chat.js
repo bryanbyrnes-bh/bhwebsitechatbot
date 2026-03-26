@@ -15,28 +15,119 @@ When the person describes their home vision, include this exactly in your respon
 
 Keep responses concise and conversational. Warm, refined tone. Ask one or two questions at a time.`;
 
-const EXTRACTION_PROMPT = `You are a data extractor. Review this conversation and extract any contact information the user has provided.
+const EXTRACTION_PROMPT = `You are a data extraction tool.
 
-If the conversation contains at minimum a name AND email address, respond with ONLY this JSON (no markdown, no explanation):
-{"hasContact": true, "firstname": "John", "lastname": "Doe", "email": "john@example.com", "phone": "5551234", "contact_type": "vendor", "company": "Company Name", "location": "", "sqft": "", "finish_level": "", "timeline": "", "notes": "brief summary"}
+Review the full conversation and extract any lead or vendor information the user has provided.
+
+Return ONLY valid JSON.
+Do not include markdown.
+Do not include explanation.
+Do not include any text before or after the JSON.
+Do not say hello.
+Do not summarize.
+
+Return exactly one JSON object with this schema:
+
+{
+  "hasContact": false,
+  "firstname": "",
+  "lastname": "",
+  "email": "",
+  "phone": "",
+  "contact_type": "",
+  "company": "",
+  "location": "",
+  "sqft": "",
+  "finish_level": "",
+  "timeline": "",
+  "notes": ""
+}
 
 Rules:
-- contact_type = "vendor" if they mentioned being a vendor/contractor, otherwise "lead"
-- Use empty string "" for any field not mentioned
-- lastname can be empty string if only first name given
-- If no name AND email present yet, respond with only: {"hasContact": false}`;
+- contact_type = "vendor" if they mentioned being a vendor or contractor, otherwise "lead"
+- Use empty string for unknown values
+- lastname can be empty if only one name is given
+- hasContact should be true if there is enough real lead info to save a contact, usually at least a name, email, or phone
+- notes should contain useful project details not already captured cleanly in the other fields
+- Return JSON only`;
+
+const EMPTY_CONTACT = {
+  hasContact: false,
+  firstname: '',
+  lastname: '',
+  email: '',
+  phone: '',
+  contact_type: '',
+  company: '',
+  location: '',
+  sqft: '',
+  finish_level: '',
+  timeline: '',
+  notes: ''
+};
+
+function extractJsonObject(text) {
+  if (!text || typeof text !== 'string') return null;
+
+  const trimmed = text.trim();
+
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    return trimmed;
+  }
+
+  const firstBrace = trimmed.indexOf('{');
+  const lastBrace = trimmed.lastIndexOf('}');
+
+  if (firstBrace === -1 || lastBrace === -1 || lastBrace <= firstBrace) {
+    return null;
+  }
+
+  return trimmed.slice(firstBrace, lastBrace + 1);
+}
+
+function safeParseContact(text) {
+  const jsonText = extractJsonObject(text);
+
+  if (!jsonText) {
+    console.log('Extraction was not JSON:', text);
+    return EMPTY_CONTACT;
+  }
+
+  try {
+    const parsed = JSON.parse(jsonText);
+
+    return {
+      hasContact: Boolean(parsed.hasContact),
+      firstname: parsed.firstname || '',
+      lastname: parsed.lastname || '',
+      email: parsed.email || '',
+      phone: parsed.phone || '',
+      contact_type: parsed.contact_type || '',
+      company: parsed.company || '',
+      location: parsed.location || '',
+      sqft: parsed.sqft || '',
+      finish_level: parsed.finish_level || '',
+      timeline: parsed.timeline || '',
+      notes: parsed.notes || ''
+    };
+  } catch (e) {
+    console.log('Extraction parse error:', e.message);
+    console.log('Raw extraction text:', text);
+    return EMPTY_CONTACT;
+  }
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
     const { messages } = req.body;
 
-    // Main chat response
     const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -46,6 +137,7 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: 'gpt-4o',
         max_tokens: 1000,
+        temperature: 0.4,
         messages: [
           { role: 'system', content: SYSTEM_PROMPT },
           ...messages
@@ -63,8 +155,8 @@ export default async function handler(req, res) {
     const text = chatData.choices[0].message.content;
     console.log('GPT response:', text);
 
-    // Separately extract contact info from the full conversation
     const allMessages = [...messages, { role: 'assistant', content: text }];
+    const transcript = allMessages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n');
 
     const extractResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -75,9 +167,10 @@ export default async function handler(req, res) {
       body: JSON.stringify({
         model: 'gpt-4o',
         max_tokens: 300,
+        temperature: 0,
         messages: [
           { role: 'system', content: EXTRACTION_PROMPT },
-          ...allMessages
+          { role: 'user', content: transcript }
         ]
       })
     });
@@ -85,16 +178,21 @@ export default async function handler(req, res) {
     const extractData = await extractResponse.json();
     let contactInfo = null;
 
-    try {
-      const raw = extractData.choices[0].message.content.trim();
+    if (extractData.error) {
+      console.error('OpenAI extraction error:', extractData.error);
+    } else {
+      const raw = extractData.choices?.[0]?.message?.content?.trim() || '';
       console.log('Extraction result:', raw);
-      const parsed = JSON.parse(raw);
-      if (parsed.hasContact === true) {
+
+      const parsed = safeParseContact(raw);
+
+      if (
+        parsed.hasContact &&
+        (parsed.email || parsed.phone || parsed.firstname || parsed.lastname)
+      ) {
         contactInfo = parsed;
-        console.log('Contact extracted:', contactInfo.email);
+        console.log('Contact extracted:', contactInfo.email || contactInfo.phone || contactInfo.firstname);
       }
-    } catch(e) {
-      console.log('Extraction parse error:', e.message);
     }
 
     return res.status(200).json({ text, contactInfo });
