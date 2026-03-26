@@ -21,7 +21,7 @@ export default async function handler(req, res) {
       city: contact.location || '',
 
       // custom properties - verify these exact internal names in HubSpot
-      contact_type__breven_: contact.contact_type || '',
+      contact_type_breven: contact.contact_type || '',
       desired_location: contact.location || '',
       square_footage: contact.sqft ? Number(contact.sqft) : null,
       finish_level: contact.finish_level || '',
