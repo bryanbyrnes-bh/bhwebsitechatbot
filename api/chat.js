@@ -23,8 +23,6 @@ Return ONLY valid JSON.
 Do not include markdown.
 Do not include explanation.
 Do not include any text before or after the JSON.
-Do not say hello.
-Do not summarize.
 
 Return exactly one JSON object with this schema:
 
@@ -44,12 +42,21 @@ Return exactly one JSON object with this schema:
 }
 
 Rules:
-- contact_type = "vendor" if they mentioned being a vendor or contractor, otherwise "lead"
-- Use empty string for unknown values
-- lastname can be empty if only one name is given
-- hasContact should be true if there is enough real lead info to save a contact, usually at least a name, email, or phone
-- notes should contain useful project details not already captured cleanly in the other fields
-- Return JSON only`;
+- contact_type must be exactly one of these HubSpot values:
+  - "Potential Homeowner"
+  - "Realtor"
+  - "Contractor"
+  - "Breven Homeowner"
+- Use "Potential Homeowner" for anyone interested in building a home.
+- Use "Contractor" for vendors, subcontractors, suppliers, or trades.
+- Use "Realtor" for real estate agents.
+- Use "Breven Homeowner" only for existing Breven homeowners or clients.
+- Never return "lead", "vendor", "buyer", "client", or any other contact_type value.
+- Use empty string for unknown values.
+- lastname can be empty if only one name is given.
+- hasContact should be true if there is enough real lead info to save a contact, usually at least a name, email, or phone.
+- notes should contain useful project details not already captured cleanly in the other fields.
+- Return JSON only.`;
 
 const EMPTY_CONTACT = {
   hasContact: false,
