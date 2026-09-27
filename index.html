@@ -603,8 +603,8 @@ async function processUserMessage(text) {
     }
 
     if (data.contactInfo && (data.contactInfo.email || data.contactInfo.phone)) {
-      await saveToHubSpot(data.contactInfo);
-      if (data.contactInfo.contact_type === 'Potential Homeowner' && !bookingPromptShown) {
+      const saved = await saveToHubSpot(data.contactInfo);
+      if (saved && data.contactInfo.contact_type === 'Potential Homeowner' && !bookingPromptShown) {
         showConsultationActions();
       }
     }
