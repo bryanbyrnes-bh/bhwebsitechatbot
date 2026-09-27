@@ -436,6 +436,9 @@ const CONFIG = {
 
 let conversationHistory = [];
 let isTyping = false;
+let hubspotContactId = null;
+let followUpTaskCreated = false;
+let workflowEventSent = false;
 
 window.addEventListener('DOMContentLoaded', startChat);
 
@@ -455,13 +458,19 @@ function addMessage(role, content, extraHTML = '') {
   div.innerHTML = `
     <div class="msg-avatar ${avatarClass}">${avatarText}</div>
     <div class="msg-content">
-      <div class="msg-bubble">${content}</div>
+      <div class="msg-bubble">${escapeHTML(content)}</div>
       ${extraHTML}
     </div>
   `;
   messages.appendChild(div);
   messages.scrollTop = messages.scrollHeight;
   return div;
+}
+
+function escapeHTML(value) {
+  return String(value).replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[char]);
 }
 
 function addAssistantMessage(text, quickReplies = []) {
@@ -557,8 +566,8 @@ async function processUserMessage(text) {
       try { generateImage(JSON.parse(renderMatch[1]).prompt); } catch(e) {}
     }
 
-    if (data.contactInfo) {
-      saveToHubSpot(data.contactInfo);
+    if (data.contactInfo && (data.contactInfo.email || data.contactInfo.phone)) {
+      await saveToHubSpot(data.contactInfo);
     }
 
   } catch (err) {
@@ -572,7 +581,11 @@ async function processUserMessage(text) {
 }
 
 function showEstimate(params) {
-  const { sqft = 2000, finish = 'premium', bedrooms = 3, bathrooms = 2 } = params;
+  const sqft = Number(params.sqft);
+  if (!Number.isFinite(sqft) || sqft < 500 || sqft > 30000) return;
+  const finish = ['standard', 'premium', 'luxury'].includes(params.finish) ? params.finish : 'premium';
+  const bedrooms = Number.isFinite(Number(params.bedrooms)) ? Number(params.bedrooms) : 3;
+  const bathrooms = Number.isFinite(Number(params.bathrooms)) ? Number(params.bathrooms) : 2;
   const multiplier = CONFIG.finishMultipliers[finish] || 1.0;
   const low = Math.round(sqft * CONFIG.pricePerSqft.low * multiplier);
   const high = Math.round(sqft * CONFIG.pricePerSqft.high * multiplier);
@@ -651,14 +664,30 @@ async function generateImage(prompt) {
 
 async function saveToHubSpot(contact) {
   try {
-    await fetch('/api/hubspot', {
+    const response = await fetch('/api/hubspot', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(contact)
+      body: JSON.stringify({
+        contact,
+        contactId: hubspotContactId,
+        createTask: !followUpTaskCreated,
+        triggerWorkflow: !workflowEventSent
+      })
     });
-    console.log('Contact saved:', contact.email);
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'HubSpot save failed');
+    hubspotContactId = data.id;
+    followUpTaskCreated ||= Boolean(data.followUp?.taskCreated);
+    workflowEventSent ||= Boolean(data.followUp?.workflowTriggered);
+    if (data.followUp?.errors?.length) {
+      console.error('Lead follow-up incomplete:', data.followUp.errors);
+      if (!followUpTaskCreated && !workflowEventSent) {
+        addAssistantMessage("I saved your details, but couldn't confirm that our team was alerted. Please use our contact page if you don't hear from us.");
+      }
+    }
   } catch(err) {
     console.error('HubSpot error:', err);
+    addAssistantMessage("I couldn't confirm your details reached our team. Please try again or use our contact page.");
   }
 }
 
