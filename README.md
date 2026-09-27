@@ -3,7 +3,7 @@
 ## What This Does
 - Greets visitors and routes vendor vs. homeowner leads
 - Collects contact info and saves to HubSpot automatically
-- Generates a preliminary $300–$400 per square foot range from the extracted square footage
+- Generates a preliminary $300–$400 per square foot range from the extracted square footage, subject to a $1 million project minimum
 - Creates an AI rendering of their dream home (via Replicate)
 
 ---
@@ -100,7 +100,7 @@ The chatbot sends one internal lead alert directly through Resend after saving t
 
 The `/api/hubspot` response reports contact save, task creation, Note save, inquiry timestamp update, and email API acceptance separately. Resend acceptance does not guarantee inbox delivery; check its delivery log and recipient inboxes. Missing email configuration does not block contact or task creation, but the response reports an email alert failure.
 
-**Production hardening:** The public HubSpot endpoint needs a bot challenge and rate limit before promoting it broadly. Restrict browser origins and add server-side request validation; CORS alone is not an authentication or abuse control. The $300–$400 per square foot estimate in `index.html` is intentionally hard-coded until Breven changes it.
+**Production hardening:** The public HubSpot endpoint needs a bot challenge and rate limit before promoting it broadly. Restrict browser origins and add server-side request validation; CORS alone is not an authentication or abuse control. The $300–$400 per square foot estimate and $1 million minimum in `index.html` are intentionally hard-coded until Breven changes them.
 
 ---
 
