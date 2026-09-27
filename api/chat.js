@@ -54,7 +54,7 @@ Rules:
 - Never return "lead", "vendor", "buyer", "client", or any other contact_type value.
 - Use empty string for unknown values.
 - lastname can be empty if only one name is given.
-- hasContact should be true if there is enough real lead info to save a contact, usually at least a name, email, or phone.
+- hasContact should be true only after the visitor provides an email address or phone number.
 - notes should contain useful project details not already captured cleanly in the other fields.
 - Return JSON only.`;
 
@@ -195,7 +195,7 @@ export default async function handler(req, res) {
 
       if (
         parsed.hasContact &&
-        (parsed.email || parsed.phone || parsed.firstname || parsed.lastname)
+        (parsed.email || parsed.phone)
       ) {
         contactInfo = parsed;
         console.log('Contact extracted:', contactInfo.email || contactInfo.phone || contactInfo.firstname);
