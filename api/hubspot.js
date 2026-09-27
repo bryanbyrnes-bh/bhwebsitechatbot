@@ -177,7 +177,7 @@ export default async function handler(req, res) {
     }
 
     if (triggerWorkflow) {
-      const property = process.env.HUBSPOT_CHAT_EVENT_PROPERTY;
+      const property = process.env.HUBSPOT_CHAT_EVENT_PROPERTY || 'bh_chat_inquiry_at';
       if (!property || !/^[a-z][a-z0-9_]*$/.test(property)) {
         followUp.errors.push('HubSpot chat workflow property is not configured');
       } else {
