@@ -452,7 +452,8 @@
 
 <script>
 const CONFIG = {
-  pricePerSqft: { low: 300, high: 400 }
+  pricePerSqft: { low: 300, high: 400 },
+  minimumProjectCost: 1000000
 };
 
 let conversationHistory = [];
@@ -633,8 +634,8 @@ function showEstimate(params) {
     ? String(params.finish).toLowerCase() : '';
   const bedrooms = Number.isFinite(Number(params.bedrooms)) && params.bedrooms !== undefined ? Number(params.bedrooms) : null;
   const bathrooms = Number.isFinite(Number(params.bathrooms)) && params.bathrooms !== undefined ? Number(params.bathrooms) : null;
-  const low = Math.round(sqft * CONFIG.pricePerSqft.low);
-  const high = Math.round(sqft * CONFIG.pricePerSqft.high);
+  const low = Math.max(CONFIG.minimumProjectCost, Math.round(sqft * CONFIG.pricePerSqft.low));
+  const high = Math.max(CONFIG.minimumProjectCost, Math.round(sqft * CONFIG.pricePerSqft.high));
   const fmt = n => '$' + n.toLocaleString();
 
   const messages = document.getElementById('messages');
@@ -645,11 +646,11 @@ function showEstimate(params) {
     <div class="msg-content">
       <div class="estimate-card">
         <div class="estimate-label">Preliminary Investment Range</div>
-        <div class="estimate-range">${fmt(low)} – ${fmt(high)}</div>
+        <div class="estimate-range">${low === high ? `Starting at ${fmt(low)}` : `${fmt(low)} – ${fmt(high)}`}</div>
         <div class="estimate-details">
           ${sqft.toLocaleString()} sq ft${bedrooms !== null && bathrooms !== null ? ` · ${bedrooms} bed / ${bathrooms} bath` : ''}<br>
           ${finish ? `${finish.charAt(0).toUpperCase() + finish.slice(1)} finish level<br>` : ''}
-          Based on $${CONFIG.pricePerSqft.low}–$${CONFIG.pricePerSqft.high}/sq ft<br>
+          Based on $${CONFIG.pricePerSqft.low}–$${CONFIG.pricePerSqft.high}/sq ft with a ${fmt(CONFIG.minimumProjectCost)} minimum<br>
           <em style="color:var(--neutral-500);font-size:10px;">Estimate only. Final pricing subject to site, design & specs.</em>
         </div>
       </div>
