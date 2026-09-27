@@ -141,18 +141,54 @@ async function saveTranscript(messages, contactId, noteId, finalized) {
   });
 }
 
+async function sendLeadAlert(contact, contactId) {
+  const to = (process.env.LEAD_ALERT_TO || '').split(',').map(value => value.trim()).filter(Boolean);
+  const from = process.env.LEAD_ALERT_FROM;
+  if (!process.env.RESEND_API_KEY || !from || !to.length) {
+    throw new Error('Email alert is not configured');
+  }
+  const name = [contact.firstname, contact.lastname].filter(Boolean).join(' ') || 'Website visitor';
+  const fields = [
+    'New Breven Homes website chat inquiry',
+    `Name: ${name}`,
+    `Email: ${contact.email || 'Not provided'}`,
+    `Phone: ${contact.phone || 'Not provided'}`,
+    `Type: ${contact.contact_type || 'Unknown'}`,
+    contact.location && `Location: ${contact.location}`,
+    contact.sqft && `Square footage: ${contact.sqft}`,
+    contact.timeline && `Timeline: ${contact.timeline}`,
+    `HubSpot contact: https://app-na2.hubspot.com/contacts/245159698/contact/${encodeURIComponent(contactId)}`
+  ].filter(Boolean);
+  const response = await fetch('https://api.resend.com/emails', {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      from,
+      to,
+      subject: `New Breven Homes chat inquiry — ${name.replace(/[\r\n]/g, ' ').slice(0, 100)}`,
+      text: fields.join('\n')
+    })
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data.message || `Email provider returned ${response.status}`);
+  return data;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if (!process.env.HUBSPOT_ACCESS_TOKEN) return res.status(500).json({ error: 'HubSpot is not configured' });
 
-  const { contact, contactId, createTask, triggerWorkflow, messages, noteId, finalized } = req.body || {};
+  const { contact, contactId, createTask, recordInquiry, sendAlert, messages, noteId, finalized } = req.body || {};
   const email = typeof contact?.email === 'string' ? contact.email.trim() : '';
   const phone = typeof contact?.phone === 'string' ? contact.phone.trim() : '';
   if (!email && !phone) return res.status(400).json({ error: 'Email or phone is required' });
 
   try {
     const saved = await upsertContact({ ...contact, email, phone }, contactId);
-    const followUp = { taskCreated: false, workflowTriggered: false, noteSaved: false, errors: [] };
+    const followUp = { taskCreated: false, inquiryRecorded: false, alertSent: false, noteSaved: false, errors: [] };
 
     if (Array.isArray(messages) && messages.length) {
       try {
@@ -176,20 +212,31 @@ export default async function handler(req, res) {
       }
     }
 
-    if (triggerWorkflow) {
+    if (recordInquiry) {
       const property = process.env.HUBSPOT_CHAT_EVENT_PROPERTY || 'bh_chat_inquiry_at';
       if (!property || !/^[a-z][a-z0-9_]*$/.test(property)) {
-        followUp.errors.push('HubSpot chat workflow property is not configured');
+        followUp.errors.push('HubSpot chat inquiry property is not configured');
       } else {
         try {
           await hubspot(`/crm/v3/objects/contacts/${saved.id}`, 'PATCH', {
             properties: { [property]: new Date().toISOString() }
           });
-          followUp.workflowTriggered = true;
+          followUp.inquiryRecorded = true;
         } catch (error) {
-          console.error('HubSpot workflow event update failed:', error);
-          followUp.errors.push('Workflow event update failed');
+          console.error('HubSpot inquiry timestamp update failed:', error);
+          followUp.errors.push('Inquiry timestamp update failed');
         }
+      }
+    }
+
+    if (sendAlert) {
+      try {
+        const alert = await sendLeadAlert({ ...contact, email, phone }, saved.id);
+        followUp.alertSent = true;
+        followUp.alertId = alert.id;
+      } catch (error) {
+        console.error('Lead email alert failed:', error);
+        followUp.errors.push('Email alert failed');
       }
     }
 
