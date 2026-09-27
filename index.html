@@ -468,18 +468,23 @@ let chatEnded = false;
 let bookingPromptShown = false;
 let bookingUrl = null;
 let lastEstimateSqft = null;
-const entryPoint = new URLSearchParams(window.location.search).get('intent') === 'planning'
-  ? 'planning' : 'general';
+const query = new URLSearchParams(window.location.search);
+const offerActive = Date.now() < Date.parse('2026-10-28T05:00:00Z');
+const entryPoint = query.get('offer') === 'appliance' && offerActive ? 'appliance'
+  : query.get('intent') === 'planning' ? 'planning' : 'general';
 
 window.addEventListener('DOMContentLoaded', startChat);
 
 async function startChat() {
   const planning = entryPoint === 'planning';
-  const greeting = planning
+  const offer = entryPoint === 'appliance';
+  const greeting = offer
+    ? "For new Breven custom homes, we're offering a $10,000 appliance credit when you sign a preliminary building agreement by October 27, 2026. That first agreement begins architectural design, starts setting up allowances, and begins interior design. The credit is toward appliances for your Breven home. If you'd like to discuss the offer and your plans, what are your name, email address, and phone number?"
+    : planning
     ? "We offer a complimentary homeowner planning session to talk through your ideas, the kind of home you have in mind, and the steps involved in building it. If you have a lot or one you're considering, we'll visit it with you and evaluate it together. If you're still looking for land, we're happy to meet in person and discuss potential lots. There's no charge for the session. If you'd like us to follow up, what are your name, email address, and phone number?"
     : "Welcome to Breven Homes. I'm here to help make your dream home a reality in the Texas Hill Country. What brings you here today — are you exploring building a custom home, or are you a vendor or contractor looking to connect with our team?";
   conversationHistory.push({ role: 'assistant', content: greeting });
-  addAssistantMessage(greeting, planning ? [] :
+  addAssistantMessage(greeting, planning || offer ? [] :
     ['I want to build a home', "I'm a vendor / contractor", 'Just browsing']);
   try {
     const response = await fetch('/api/booking');
@@ -613,7 +618,7 @@ async function processUserMessage(text) {
 
     if (data.contactInfo && (data.contactInfo.email || data.contactInfo.phone)) {
       const saved = await saveToHubSpot(data.contactInfo);
-      if (saved && data.contactInfo.contact_type === 'Potential Homeowner' && !bookingPromptShown) {
+      if (saved && (entryPoint === 'appliance' || data.contactInfo.contact_type === 'Potential Homeowner') && !bookingPromptShown) {
         showConsultationActions();
       }
     }
@@ -756,7 +761,7 @@ function showConsultationActions() {
   const actions = document.createElement('div');
   actions.className = 'consultation-actions';
   const book = document.createElement('button');
-  book.textContent = entryPoint === 'planning'
+  book.textContent = entryPoint === 'planning' || entryPoint === 'appliance'
     ? (bookingUrl ? 'Book a planning session' : 'Request a planning session')
     : (bookingUrl ? 'Book a consultation' : 'Request a consultation');
   book.addEventListener('click', async () => {
@@ -764,10 +769,10 @@ function showConsultationActions() {
       window.open(bookingUrl, '_blank', 'noopener');
       conversationHistory.push({ role: 'assistant', content: 'I opened the consultation booking page for you.' });
     } else {
-      const request = entryPoint === 'planning'
+      const request = entryPoint === 'planning' || entryPoint === 'appliance'
         ? 'I would like to request a complimentary planning session with Melinda.'
         : 'I would like to request a consultation with Melinda.';
-      const reply = entryPoint === 'planning'
+      const reply = entryPoint === 'planning' || entryPoint === 'appliance'
         ? 'Melinda will follow up to arrange your planning session.'
         : 'Melinda will follow up to arrange a consultation.';
       conversationHistory.push({ role: 'user', content: request });
