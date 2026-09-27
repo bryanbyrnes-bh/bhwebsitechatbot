@@ -468,16 +468,19 @@ let chatEnded = false;
 let bookingPromptShown = false;
 let bookingUrl = null;
 let lastEstimateSqft = null;
+const entryPoint = new URLSearchParams(window.location.search).get('intent') === 'planning'
+  ? 'planning' : 'general';
 
 window.addEventListener('DOMContentLoaded', startChat);
 
 async function startChat() {
-  const greeting = "Welcome to Breven Homes. I'm here to help make your dream home a reality in the Texas Hill Country. What brings you here today — are you exploring building a custom home, or are you a vendor or contractor looking to connect with our team?";
+  const planning = entryPoint === 'planning';
+  const greeting = planning
+    ? "We offer a complimentary homeowner planning session to talk through your ideas, the kind of home you have in mind, and the steps involved in building it. If you have a lot or one you're considering, we'll visit it with you and evaluate it together. If you're still looking for land, we're happy to meet in person and discuss potential lots. There's no charge for the session. If you'd like us to follow up, what are your name, email address, and phone number?"
+    : "Welcome to Breven Homes. I'm here to help make your dream home a reality in the Texas Hill Country. What brings you here today — are you exploring building a custom home, or are you a vendor or contractor looking to connect with our team?";
   conversationHistory.push({ role: 'assistant', content: greeting });
-  addAssistantMessage(
-    greeting,
-    ['I want to build a home', "I'm a vendor / contractor", 'Just browsing']
-  );
+  addAssistantMessage(greeting, planning ? [] :
+    ['I want to build a home', "I'm a vendor / contractor", 'Just browsing']);
   try {
     const response = await fetch('/api/booking');
     if (response.ok) bookingUrl = (await response.json()).url;
@@ -570,7 +573,7 @@ async function processUserMessage(text) {
     const response = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages: conversationHistory })
+      body: JSON.stringify({ messages: conversationHistory, entryPoint })
     });
 
     const data = await response.json();
@@ -716,6 +719,7 @@ async function saveToHubSpot(contact, finalized = false) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         contact,
+        entryPoint,
         contactId: hubspotContactId,
         createTask: !followUpTaskCreated,
         recordInquiry: !inquiryRecorded,
@@ -752,15 +756,23 @@ function showConsultationActions() {
   const actions = document.createElement('div');
   actions.className = 'consultation-actions';
   const book = document.createElement('button');
-  book.textContent = bookingUrl ? 'Book a consultation' : 'Request a consultation';
+  book.textContent = entryPoint === 'planning'
+    ? (bookingUrl ? 'Book a planning session' : 'Request a planning session')
+    : (bookingUrl ? 'Book a consultation' : 'Request a consultation');
   book.addEventListener('click', async () => {
     if (bookingUrl) {
       window.open(bookingUrl, '_blank', 'noopener');
       conversationHistory.push({ role: 'assistant', content: 'I opened the consultation booking page for you.' });
     } else {
-      conversationHistory.push({ role: 'user', content: 'I would like to request a consultation with Melinda.' });
-      addAssistantMessage('Melinda will follow up to arrange a consultation.');
-      conversationHistory.push({ role: 'assistant', content: 'Melinda will follow up to arrange a consultation.' });
+      const request = entryPoint === 'planning'
+        ? 'I would like to request a complimentary planning session with Melinda.'
+        : 'I would like to request a consultation with Melinda.';
+      const reply = entryPoint === 'planning'
+        ? 'Melinda will follow up to arrange your planning session.'
+        : 'Melinda will follow up to arrange a consultation.';
+      conversationHistory.push({ role: 'user', content: request });
+      addAssistantMessage(reply);
+      conversationHistory.push({ role: 'assistant', content: reply });
     }
     await finishChat();
   });
@@ -789,6 +801,7 @@ window.addEventListener('pagehide', () => {
   if (!chatEnded && lastContactInfo && hubspotContactId && transcriptNoteId) {
     navigator.sendBeacon('/api/hubspot', new Blob([JSON.stringify({
       contact: lastContactInfo,
+      entryPoint,
       contactId: hubspotContactId,
       noteId: transcriptNoteId,
       messages: conversationHistory,

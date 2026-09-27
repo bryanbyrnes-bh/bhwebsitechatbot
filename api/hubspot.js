@@ -70,7 +70,7 @@ async function upsertContact(contact, contactId) {
   }
 }
 
-async function createFollowUp(contact, contactId) {
+async function createFollowUp(contact, contactId, entryPoint) {
   const association = await hubspot('/crm/v4/associations/tasks/contacts/labels', 'GET');
   const defaultType = association.results?.find(item => item.category === 'HUBSPOT_DEFINED' && item.label === null);
   if (!defaultType) throw new Error('HubSpot task-to-contact association was not found');
@@ -78,6 +78,7 @@ async function createFollowUp(contact, contactId) {
   const name = [contact.firstname, contact.lastname].filter(Boolean).join(' ') || contact.email || contact.phone;
   const details = [
     `Source: Breven Homes website chatbot`,
+    entryPoint === 'planning' && 'Inquiry: Complimentary Homeowner Planning Session',
     `Type: ${contact.contact_type || 'Unknown'}`,
     `Name: ${name}`,
     `Email: ${contact.email || 'Not provided'}`,
@@ -92,7 +93,7 @@ async function createFollowUp(contact, contactId) {
   return hubspot('/crm/v3/objects/tasks', 'POST', {
     properties: {
       hs_timestamp: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      hs_task_subject: `Follow up: website chat — ${name}`,
+      hs_task_subject: `Follow up: ${entryPoint === 'planning' ? 'planning session' : 'website chat'} — ${name}`,
       hs_task_body: details,
       hs_task_status: 'NOT_STARTED',
       hubspot_owner_id: process.env.HUBSPOT_TASK_OWNER_ID || '168491860'
@@ -141,7 +142,7 @@ async function saveTranscript(messages, contactId, noteId, finalized) {
   });
 }
 
-async function sendLeadAlert(contact, contactId) {
+async function sendLeadAlert(contact, contactId, entryPoint) {
   const to = (process.env.LEAD_ALERT_TO || '').split(',').map(value => value.trim()).filter(Boolean);
   const from = process.env.LEAD_ALERT_FROM;
   if (!process.env.RESEND_API_KEY || !from || !to.length) {
@@ -149,7 +150,7 @@ async function sendLeadAlert(contact, contactId) {
   }
   const name = [contact.firstname, contact.lastname].filter(Boolean).join(' ') || 'Website visitor';
   const fields = [
-    'New Breven Homes website chat inquiry',
+    entryPoint === 'planning' ? 'New complimentary planning session inquiry' : 'New Breven Homes website chat inquiry',
     `Name: ${name}`,
     `Email: ${contact.email || 'Not provided'}`,
     `Phone: ${contact.phone || 'Not provided'}`,
@@ -168,7 +169,7 @@ async function sendLeadAlert(contact, contactId) {
     body: JSON.stringify({
       from,
       to,
-      subject: `New Breven Homes chat inquiry — ${name.replace(/[\r\n]/g, ' ').slice(0, 100)}`,
+      subject: `New Breven Homes ${entryPoint === 'planning' ? 'planning session' : 'chat inquiry'} — ${name.replace(/[\r\n]/g, ' ').slice(0, 100)}`,
       text: fields.join('\n')
     })
   });
@@ -181,7 +182,7 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if (!process.env.HUBSPOT_ACCESS_TOKEN) return res.status(500).json({ error: 'HubSpot is not configured' });
 
-  const { contact, contactId, createTask, recordInquiry, sendAlert, messages, noteId, finalized } = req.body || {};
+  const { contact, contactId, createTask, recordInquiry, sendAlert, messages, noteId, finalized, entryPoint } = req.body || {};
   const email = typeof contact?.email === 'string' ? contact.email.trim() : '';
   const phone = typeof contact?.phone === 'string' ? contact.phone.trim() : '';
   if (!email && !phone) return res.status(400).json({ error: 'Email or phone is required' });
@@ -203,7 +204,7 @@ export default async function handler(req, res) {
 
     if (createTask) {
       try {
-        const task = await createFollowUp({ ...contact, email, phone }, saved.id);
+        const task = await createFollowUp({ ...contact, email, phone }, saved.id, entryPoint);
         followUp.taskCreated = true;
         followUp.taskId = task.id;
       } catch (error) {
@@ -231,7 +232,7 @@ export default async function handler(req, res) {
 
     if (sendAlert) {
       try {
-        const alert = await sendLeadAlert({ ...contact, email, phone }, saved.id);
+        const alert = await sendLeadAlert({ ...contact, email, phone }, saved.id, entryPoint);
         followUp.alertSent = true;
         followUp.alertId = alert.id;
       } catch (error) {
