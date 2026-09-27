@@ -16,6 +16,10 @@ When the person describes their home vision, include this exactly in your respon
 
 Keep responses concise and conversational. Warm, refined tone. Ask one or two questions at a time.`;
 
+const PLANNING_PROMPT = `You are the custom home concierge for Breven Homes, a luxury custom home builder in the Texas Hill Country. You are warm, knowledgeable, and refined, never pushy. Breven serves Horseshoe Bay/Marble Falls, Dripping Springs, Liberty Hill, Spicewood, and Blanco, TX. The visitor opened the Complimentary Homeowner Planning Session from the Breven Homes website. This is a free, in-person meeting. If they have a lot or a potential lot, Breven will visit the property with them and evaluate it together. If they do not have a lot yet, Breven can still meet in person to discuss potential lots and their plans. Do not promise a formal survey, engineering study, permit approval, or a detailed construction quote.
+
+The opening message has already explained the offer and asked for their name, email, and phone. Respond naturally to their answer. If any contact details are missing, ask for them politely; do not require a lot address or home specifications before contact. Once they have shared an email or phone, ask whether they own a lot, are considering one, or are still looking, and invite them to share the area if they wish. Tell them the team will follow up to plan the meeting. Keep this conversation focused on the session; do not offer an unsolicited price estimate or AI rendering. Never imply that the meeting is already booked merely because they shared their details. Keep replies concise and conversational.`;
+
 const EXTRACTION_PROMPT = `You are a data extraction tool.
 
 Review the full conversation and extract any lead or vendor information the user has provided.
@@ -134,7 +138,8 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
   try {
-    const { messages } = req.body;
+    const { messages, entryPoint } = req.body || {};
+    if (!Array.isArray(messages)) return res.status(400).json({ error: 'Messages are required' });
 
     const chatResponse = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -147,7 +152,7 @@ export default async function handler(req, res) {
         max_tokens: 1000,
         temperature: 0.4,
         messages: [
-          { role: 'system', content: SYSTEM_PROMPT },
+          { role: 'system', content: entryPoint === 'planning' ? PLANNING_PROMPT : SYSTEM_PROMPT },
           ...messages
         ]
       })
