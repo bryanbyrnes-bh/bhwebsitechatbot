@@ -157,7 +157,7 @@ async function sendLeadAlert(contact, contactId) {
     contact.location && `Location: ${contact.location}`,
     contact.sqft && `Square footage: ${contact.sqft}`,
     contact.timeline && `Timeline: ${contact.timeline}`,
-    `HubSpot contact: https://app-na2.hubspot.com/contacts/245159698/contact/${encodeURIComponent(contactId)}`
+    `HubSpot contact: https://app.hubspot.com/contacts/245159698/record/0-1/${encodeURIComponent(contactId)}`
   ].filter(Boolean);
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
