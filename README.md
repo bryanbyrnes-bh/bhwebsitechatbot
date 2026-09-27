@@ -27,8 +27,9 @@ In Vercel dashboard → Your project → Settings → Environment Variables:
 | `OPENAI_API_KEY` | server-side OpenAI API key |
 | `REPLICATE_API_KEY` | your r8_... key |
 | `HUBSPOT_ACCESS_TOKEN` | your pat-na1-... token |
-| `HUBSPOT_TASK_OWNER_ID` | `162307683` (Bryan Byrnes; optional default) |
+| `HUBSPOT_TASK_OWNER_ID` | `168491860` (Melinda Blackmon; optional default) |
 | `HUBSPOT_CHAT_EVENT_PROPERTY` | `bh_chat_inquiry_at` after creating this contact property |
+| `CONSULTATION_BOOKING_URL` | Melinda's verified HTTPS calendar link, when available |
 
 Keys are read by the serverless functions and must never be placed in browser code.
 
@@ -79,7 +80,11 @@ Add a Webflow interaction that shows a div containing:
 
 ### New website chat follow-up
 
-The server creates a task associated with the contact when the visitor first provides an email or phone. It assigns the task to Bryan Byrnes and gives it a due date 24 hours later. Later messages update the same contact in the browser session without creating a task each turn. If a visitor returns in a new session, a new inquiry can produce a new task.
+The server creates a task associated with the contact when the visitor first provides an email or phone. It assigns the task to Melinda Blackmon and gives it a due date 24 hours later. Later messages update the same contact in the browser session without creating a task each turn. If a visitor returns in a new session, a new inquiry can produce a new task.
+
+The chat transcript is saved as a single HubSpot Note associated with the contact and refreshed after each turn. **Finish chat** marks the Note completed. The browser also attempts a final update when the page closes; because browsers can interrupt that request, the last successfully saved turn remains in the Note even if the final request fails. This includes the visitor and assistant messages; AI control markers for estimates and renderings are removed. A chat without an email or phone cannot be attached to a contact.
+
+After a potential homeowner shares contact details, the chat shows a consultation action. When `CONSULTATION_BOOKING_URL` is set to a verified HTTPS scheduling page, it opens the calendar. Until then, the button becomes **Request a consultation**, records that request in the transcript Note, and leaves the follow-up task with Melinda. Do not use an inferred HubSpot meeting URL: `https://meetings.hubspot.com/melinda-blackmon` currently returns a missing-page error.
 
 To send the internal alert from HubSpot:
 
@@ -89,7 +94,7 @@ To send the internal alert from HubSpot:
 
 The `/api/hubspot` response reports contact save, task creation, and workflow event update separately. A successful event property update proves only that HubSpot accepted the trigger property; verify the workflow and email delivery in HubSpot. If the property is missing, contact and task creation can still succeed, but the response reports a workflow event failure.
 
-**Production hardening:** The public HubSpot endpoint needs a bot challenge and rate limit before promoting it broadly. Restrict browser origins and add server-side request validation; CORS alone is not an authentication or abuse control. Review chatbot cost estimates with current Breven pricing, since the figures in `index.html` are hard-coded.
+**Production hardening:** The public HubSpot endpoint needs a bot challenge and rate limit before promoting it broadly. Restrict browser origins and add server-side request validation; CORS alone is not an authentication or abuse control. The $300–$400 per square foot estimate in `index.html` is intentionally hard-coded until Breven changes it.
 
 ---
 
