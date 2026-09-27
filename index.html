@@ -211,6 +211,28 @@
     cursor: not-allowed;
   }
 
+  .consultation-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 6px 0 0 40px;
+  }
+
+  .consultation-actions button {
+    padding: 10px 14px;
+    border: 1px solid var(--neutral-800);
+    background: var(--neutral-800);
+    color: white;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .consultation-actions button.secondary {
+    background: white;
+    color: var(--neutral-800);
+  }
+
   /* ── Estimate card ── */
   .estimate-card {
     border: 1px solid var(--neutral-800);
@@ -439,14 +461,27 @@ let isTyping = false;
 let hubspotContactId = null;
 let followUpTaskCreated = false;
 let workflowEventSent = false;
+let transcriptNoteId = null;
+let lastContactInfo = null;
+let chatEnded = false;
+let bookingPromptShown = false;
+let bookingUrl = null;
 
 window.addEventListener('DOMContentLoaded', startChat);
 
 async function startChat() {
+  const greeting = "Welcome to Breven Homes. I'm here to help make your dream home a reality in the Texas Hill Country. What brings you here today — are you exploring building a custom home, or are you a vendor or contractor looking to connect with our team?";
+  conversationHistory.push({ role: 'assistant', content: greeting });
   addAssistantMessage(
-    "Welcome to Breven Homes. I'm here to help make your dream home a reality in the Texas Hill Country. What brings you here today — are you exploring building a custom home, or are you a vendor or contractor looking to connect with our team?",
+    greeting,
     ['I want to build a home', "I'm a vendor / contractor", 'Just browsing']
   );
+  try {
+    const response = await fetch('/api/booking');
+    if (response.ok) bookingUrl = (await response.json()).url;
+  } catch (error) {
+    console.error('Booking link unavailable:', error);
+  }
 }
 
 function addMessage(role, content, extraHTML = '') {
@@ -516,7 +551,7 @@ function handleQuickReply(text) {
 async function sendMessage() {
   const input = document.getElementById('userInput');
   const text = input.value.trim();
-  if (!text || isTyping) return;
+  if (!text || isTyping || chatEnded) return;
   input.value = '';
   input.style.height = 'auto';
   addMessage('user', text);
@@ -568,6 +603,9 @@ async function processUserMessage(text) {
 
     if (data.contactInfo && (data.contactInfo.email || data.contactInfo.phone)) {
       await saveToHubSpot(data.contactInfo);
+      if (data.contactInfo.contact_type === 'Potential Homeowner' && !bookingPromptShown) {
+        showConsultationActions();
+      }
     }
 
   } catch (err) {
@@ -662,7 +700,7 @@ async function generateImage(prompt) {
   }
 }
 
-async function saveToHubSpot(contact) {
+async function saveToHubSpot(contact, finalized = false) {
   try {
     const response = await fetch('/api/hubspot', {
       method: 'POST',
@@ -671,25 +709,84 @@ async function saveToHubSpot(contact) {
         contact,
         contactId: hubspotContactId,
         createTask: !followUpTaskCreated,
-        triggerWorkflow: !workflowEventSent
+        triggerWorkflow: !workflowEventSent,
+        messages: conversationHistory,
+        noteId: transcriptNoteId,
+        finalized
       })
     });
     const data = await response.json();
     if (!response.ok || !data.success) throw new Error(data.error || 'HubSpot save failed');
     hubspotContactId = data.id;
+    lastContactInfo = contact;
     followUpTaskCreated ||= Boolean(data.followUp?.taskCreated);
     workflowEventSent ||= Boolean(data.followUp?.workflowTriggered);
+    if (data.followUp?.noteSaved) transcriptNoteId = data.followUp.noteId;
     if (data.followUp?.errors?.length) {
       console.error('Lead follow-up incomplete:', data.followUp.errors);
       if (!followUpTaskCreated && !workflowEventSent) {
         addAssistantMessage("I saved your details, but couldn't confirm that our team was alerted. Please use our contact page if you don't hear from us.");
       }
     }
+    return true;
   } catch(err) {
     console.error('HubSpot error:', err);
     addAssistantMessage("I couldn't confirm your details reached our team. Please try again or use our contact page.");
+    return false;
   }
 }
+
+function showConsultationActions() {
+  bookingPromptShown = true;
+  const actions = document.createElement('div');
+  actions.className = 'consultation-actions';
+  const book = document.createElement('button');
+  book.textContent = bookingUrl ? 'Book a consultation' : 'Request a consultation';
+  book.addEventListener('click', async () => {
+    if (bookingUrl) {
+      window.open(bookingUrl, '_blank', 'noopener');
+      conversationHistory.push({ role: 'assistant', content: 'I opened the consultation booking page for you.' });
+    } else {
+      conversationHistory.push({ role: 'user', content: 'I would like to request a consultation with Melinda.' });
+      addAssistantMessage('Melinda will follow up to arrange a consultation.');
+      conversationHistory.push({ role: 'assistant', content: 'Melinda will follow up to arrange a consultation.' });
+    }
+    await finishChat();
+  });
+  const finish = document.createElement('button');
+  finish.className = 'secondary';
+  finish.textContent = 'Finish chat';
+  finish.addEventListener('click', finishChat);
+  actions.append(book, finish);
+  const messages = document.getElementById('messages');
+  messages.appendChild(actions);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+async function finishChat() {
+  if (chatEnded) return;
+  chatEnded = true;
+  document.getElementById('sendBtn').disabled = true;
+  document.getElementById('userInput').disabled = true;
+  const closing = 'Thank you for chatting with Breven Homes.';
+  conversationHistory.push({ role: 'assistant', content: closing });
+  const saved = lastContactInfo ? await saveToHubSpot(lastContactInfo, true) : false;
+  addAssistantMessage(saved ? `${closing} Our team has your details.` : closing);
+}
+
+window.addEventListener('pagehide', () => {
+  if (!chatEnded && lastContactInfo && hubspotContactId && transcriptNoteId) {
+    navigator.sendBeacon('/api/hubspot', new Blob([JSON.stringify({
+      contact: lastContactInfo,
+      contactId: hubspotContactId,
+      noteId: transcriptNoteId,
+      messages: conversationHistory,
+      finalized: true,
+      createTask: false,
+      triggerWorkflow: false
+    })], { type: 'application/json' }));
+  }
+});
 
 const input = document.getElementById('userInput');
 input.addEventListener('keydown', e => {
