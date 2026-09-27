@@ -460,8 +460,7 @@ let conversationHistory = [];
 let isTyping = false;
 let hubspotContactId = null;
 let followUpTaskCreated = false;
-let inquiryRecorded = false;
-let alertSent = false;
+let workflowEventSent = false;
 let transcriptNoteId = null;
 let lastContactInfo = null;
 let chatEnded = false;
@@ -710,8 +709,7 @@ async function saveToHubSpot(contact, finalized = false) {
         contact,
         contactId: hubspotContactId,
         createTask: !followUpTaskCreated,
-        recordInquiry: !inquiryRecorded,
-        sendAlert: !alertSent,
+        triggerWorkflow: !workflowEventSent,
         messages: conversationHistory,
         noteId: transcriptNoteId,
         finalized
@@ -722,12 +720,11 @@ async function saveToHubSpot(contact, finalized = false) {
     hubspotContactId = data.id;
     lastContactInfo = contact;
     followUpTaskCreated ||= Boolean(data.followUp?.taskCreated);
-    inquiryRecorded ||= Boolean(data.followUp?.inquiryRecorded);
-    alertSent ||= Boolean(data.followUp?.alertSent);
+    workflowEventSent ||= Boolean(data.followUp?.workflowTriggered);
     if (data.followUp?.noteSaved) transcriptNoteId = data.followUp.noteId;
     if (data.followUp?.errors?.length) {
       console.error('Lead follow-up incomplete:', data.followUp.errors);
-      if (!followUpTaskCreated && !alertSent) {
+      if (!followUpTaskCreated && !workflowEventSent) {
         addAssistantMessage("I saved your details, but couldn't confirm that our team was alerted. Please use our contact page if you don't hear from us.");
       }
     }
@@ -786,8 +783,7 @@ window.addEventListener('pagehide', () => {
       messages: conversationHistory,
       finalized: true,
       createTask: false,
-      recordInquiry: false,
-      sendAlert: false
+      triggerWorkflow: false
     })], { type: 'application/json' }));
   }
 });
