@@ -211,6 +211,28 @@
     cursor: not-allowed;
   }
 
+  .consultation-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin: 6px 0 0 40px;
+  }
+
+  .consultation-actions button {
+    padding: 10px 14px;
+    border: 1px solid var(--neutral-800);
+    background: var(--neutral-800);
+    color: white;
+    font: inherit;
+    font-size: 12px;
+    cursor: pointer;
+  }
+
+  .consultation-actions button.secondary {
+    background: white;
+    color: var(--neutral-800);
+  }
+
   /* ── Estimate card ── */
   .estimate-card {
     border: 1px solid var(--neutral-800);
@@ -436,14 +458,31 @@ const CONFIG = {
 
 let conversationHistory = [];
 let isTyping = false;
+let hubspotContactId = null;
+let followUpTaskCreated = false;
+let inquiryRecorded = false;
+let alertSent = false;
+let transcriptNoteId = null;
+let lastContactInfo = null;
+let chatEnded = false;
+let bookingPromptShown = false;
+let bookingUrl = null;
 
 window.addEventListener('DOMContentLoaded', startChat);
 
 async function startChat() {
+  const greeting = "Welcome to Breven Homes. I'm here to help make your dream home a reality in the Texas Hill Country. What brings you here today — are you exploring building a custom home, or are you a vendor or contractor looking to connect with our team?";
+  conversationHistory.push({ role: 'assistant', content: greeting });
   addAssistantMessage(
-    "Welcome to Breven Homes. I'm here to help make your dream home a reality in the Texas Hill Country. What brings you here today — are you exploring building a custom home, or are you a vendor or contractor looking to connect with our team?",
+    greeting,
     ['I want to build a home', "I'm a vendor / contractor", 'Just browsing']
   );
+  try {
+    const response = await fetch('/api/booking');
+    if (response.ok) bookingUrl = (await response.json()).url;
+  } catch (error) {
+    console.error('Booking link unavailable:', error);
+  }
 }
 
 function addMessage(role, content, extraHTML = '') {
@@ -455,13 +494,19 @@ function addMessage(role, content, extraHTML = '') {
   div.innerHTML = `
     <div class="msg-avatar ${avatarClass}">${avatarText}</div>
     <div class="msg-content">
-      <div class="msg-bubble">${content}</div>
+      <div class="msg-bubble">${escapeHTML(content)}</div>
       ${extraHTML}
     </div>
   `;
   messages.appendChild(div);
   messages.scrollTop = messages.scrollHeight;
   return div;
+}
+
+function escapeHTML(value) {
+  return String(value).replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[char]);
 }
 
 function addAssistantMessage(text, quickReplies = []) {
@@ -507,7 +552,7 @@ function handleQuickReply(text) {
 async function sendMessage() {
   const input = document.getElementById('userInput');
   const text = input.value.trim();
-  if (!text || isTyping) return;
+  if (!text || isTyping || chatEnded) return;
   input.value = '';
   input.style.height = 'auto';
   addMessage('user', text);
@@ -557,8 +602,11 @@ async function processUserMessage(text) {
       try { generateImage(JSON.parse(renderMatch[1]).prompt); } catch(e) {}
     }
 
-    if (data.contactInfo) {
-      saveToHubSpot(data.contactInfo);
+    if (data.contactInfo && (data.contactInfo.email || data.contactInfo.phone)) {
+      const saved = await saveToHubSpot(data.contactInfo);
+      if (saved && data.contactInfo.contact_type === 'Potential Homeowner' && !bookingPromptShown) {
+        showConsultationActions();
+      }
     }
 
   } catch (err) {
@@ -572,7 +620,11 @@ async function processUserMessage(text) {
 }
 
 function showEstimate(params) {
-  const { sqft = 2000, finish = 'premium', bedrooms = 3, bathrooms = 2 } = params;
+  const sqft = Number(params.sqft);
+  if (!Number.isFinite(sqft) || sqft < 500 || sqft > 30000) return;
+  const finish = ['standard', 'premium', 'luxury'].includes(params.finish) ? params.finish : 'premium';
+  const bedrooms = Number.isFinite(Number(params.bedrooms)) ? Number(params.bedrooms) : 3;
+  const bathrooms = Number.isFinite(Number(params.bathrooms)) ? Number(params.bathrooms) : 2;
   const multiplier = CONFIG.finishMultipliers[finish] || 1.0;
   const low = Math.round(sqft * CONFIG.pricePerSqft.low * multiplier);
   const high = Math.round(sqft * CONFIG.pricePerSqft.high * multiplier);
@@ -649,18 +701,96 @@ async function generateImage(prompt) {
   }
 }
 
-async function saveToHubSpot(contact) {
+async function saveToHubSpot(contact, finalized = false) {
   try {
-    await fetch('/api/hubspot', {
+    const response = await fetch('/api/hubspot', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(contact)
+      body: JSON.stringify({
+        contact,
+        contactId: hubspotContactId,
+        createTask: !followUpTaskCreated,
+        recordInquiry: !inquiryRecorded,
+        sendAlert: !alertSent,
+        messages: conversationHistory,
+        noteId: transcriptNoteId,
+        finalized
+      })
     });
-    console.log('Contact saved:', contact.email);
+    const data = await response.json();
+    if (!response.ok || !data.success) throw new Error(data.error || 'HubSpot save failed');
+    hubspotContactId = data.id;
+    lastContactInfo = contact;
+    followUpTaskCreated ||= Boolean(data.followUp?.taskCreated);
+    inquiryRecorded ||= Boolean(data.followUp?.inquiryRecorded);
+    alertSent ||= Boolean(data.followUp?.alertSent);
+    if (data.followUp?.noteSaved) transcriptNoteId = data.followUp.noteId;
+    if (data.followUp?.errors?.length) {
+      console.error('Lead follow-up incomplete:', data.followUp.errors);
+      if (!followUpTaskCreated && !alertSent) {
+        addAssistantMessage("I saved your details, but couldn't confirm that our team was alerted. Please use our contact page if you don't hear from us.");
+      }
+    }
+    return true;
   } catch(err) {
     console.error('HubSpot error:', err);
+    addAssistantMessage("I couldn't confirm your details reached our team. Please try again or use our contact page.");
+    return false;
   }
 }
+
+function showConsultationActions() {
+  bookingPromptShown = true;
+  const actions = document.createElement('div');
+  actions.className = 'consultation-actions';
+  const book = document.createElement('button');
+  book.textContent = bookingUrl ? 'Book a consultation' : 'Request a consultation';
+  book.addEventListener('click', async () => {
+    if (bookingUrl) {
+      window.open(bookingUrl, '_blank', 'noopener');
+      conversationHistory.push({ role: 'assistant', content: 'I opened the consultation booking page for you.' });
+    } else {
+      conversationHistory.push({ role: 'user', content: 'I would like to request a consultation with Melinda.' });
+      addAssistantMessage('Melinda will follow up to arrange a consultation.');
+      conversationHistory.push({ role: 'assistant', content: 'Melinda will follow up to arrange a consultation.' });
+    }
+    await finishChat();
+  });
+  const finish = document.createElement('button');
+  finish.className = 'secondary';
+  finish.textContent = 'Finish chat';
+  finish.addEventListener('click', finishChat);
+  actions.append(book, finish);
+  const messages = document.getElementById('messages');
+  messages.appendChild(actions);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+async function finishChat() {
+  if (chatEnded) return;
+  chatEnded = true;
+  document.getElementById('sendBtn').disabled = true;
+  document.getElementById('userInput').disabled = true;
+  const closing = 'Thank you for chatting with Breven Homes.';
+  conversationHistory.push({ role: 'assistant', content: closing });
+  const saved = lastContactInfo ? await saveToHubSpot(lastContactInfo, true) : false;
+  addAssistantMessage(saved ? `${closing} Our team has your details.` : closing);
+}
+
+window.addEventListener('pagehide', () => {
+  if (!chatEnded && lastContactInfo && hubspotContactId && transcriptNoteId) {
+    navigator.sendBeacon('/api/hubspot', new Blob([JSON.stringify({
+      contact: lastContactInfo,
+      contactId: hubspotContactId,
+      noteId: transcriptNoteId,
+      messages: conversationHistory,
+      finalized: true,
+      createTask: false,
+      recordInquiry: false,
+      sendAlert: false
+    })], { type: 'application/json' }));
+  }
+});
 
 const input = document.getElementById('userInput');
 input.addEventListener('keydown', e => {
