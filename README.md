@@ -3,7 +3,7 @@
 ## What This Does
 - Greets visitors and routes vendor vs. homeowner leads
 - Collects contact info and saves to HubSpot automatically
-- Generates a high/low cost estimate based on sq ft and finish level
+- Generates a preliminary $300–$400 per square foot range from the extracted square footage
 - Creates an AI rendering of their dream home (via Replicate)
 
 ---
