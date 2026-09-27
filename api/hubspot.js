@@ -95,7 +95,7 @@ async function createFollowUp(contact, contactId) {
       hs_task_subject: `Follow up: website chat — ${name}`,
       hs_task_body: details,
       hs_task_status: 'NOT_STARTED',
-      hubspot_owner_id: process.env.HUBSPOT_TASK_OWNER_ID || '162307683'
+      hubspot_owner_id: process.env.HUBSPOT_TASK_OWNER_ID || '168491860'
     },
     associations: [{
       to: { id: contactId },
@@ -104,18 +104,66 @@ async function createFollowUp(contact, contactId) {
   });
 }
 
+function noteBody(messages, finalized) {
+  if (!Array.isArray(messages) || messages.length > 150) throw new Error('Invalid chat transcript');
+  const lines = messages.map(message => {
+    if (!['user', 'assistant'].includes(message?.role) || typeof message.content !== 'string') {
+      throw new Error('Invalid chat transcript');
+    }
+    return `${message.role === 'user' ? 'VISITOR' : 'BREVEN ASSISTANT'}: ${message.content
+      .replace(/\[ESTIMATE:.*?\]/gs, '').replace(/\[RENDER:.*?\]/gs, '').trim()}`;
+  });
+  const text = lines.join('\n\n');
+  if (text.length > 100000) throw new Error('Chat transcript is too long');
+  const escape = value => value.replace(/[&<>"']/g, char => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[char]);
+  return `<strong>Website chat transcript${finalized ? ' — completed' : ' — in progress'}</strong><br><br>` +
+    escape(text).replace(/\n/g, '<br>');
+}
+
+async function saveTranscript(messages, contactId, noteId, finalized) {
+  const properties = { hs_note_body: noteBody(messages, finalized) };
+  if (noteId) {
+    const note = await hubspot(
+      `/crm/v3/objects/notes/${encodeURIComponent(noteId)}?associations=contacts`, 'GET'
+    );
+    const linked = note.associations?.contacts?.results?.some(item => String(item.id) === String(contactId));
+    if (!linked) throw new Error('Transcript note is not linked to the contact');
+    return hubspot(`/crm/v3/objects/notes/${encodeURIComponent(noteId)}`, 'PATCH', { properties });
+  }
+  return hubspot('/crm/v3/objects/notes', 'POST', {
+    properties: { ...properties, hs_timestamp: new Date().toISOString() },
+    associations: [{
+      to: { id: contactId },
+      types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 202 }]
+    }]
+  });
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if (!process.env.HUBSPOT_ACCESS_TOKEN) return res.status(500).json({ error: 'HubSpot is not configured' });
 
-  const { contact, contactId, createTask, triggerWorkflow } = req.body || {};
+  const { contact, contactId, createTask, triggerWorkflow, messages, noteId, finalized } = req.body || {};
   const email = typeof contact?.email === 'string' ? contact.email.trim() : '';
   const phone = typeof contact?.phone === 'string' ? contact.phone.trim() : '';
   if (!email && !phone) return res.status(400).json({ error: 'Email or phone is required' });
 
   try {
     const saved = await upsertContact({ ...contact, email, phone }, contactId);
-    const followUp = { taskCreated: false, workflowTriggered: false, errors: [] };
+    const followUp = { taskCreated: false, workflowTriggered: false, noteSaved: false, errors: [] };
+
+    if (Array.isArray(messages) && messages.length) {
+      try {
+        const note = await saveTranscript(messages, saved.id, noteId, Boolean(finalized));
+        followUp.noteSaved = true;
+        followUp.noteId = note.id;
+      } catch (error) {
+        console.error('HubSpot transcript note failed:', error);
+        followUp.errors.push('Transcript note save failed');
+      }
+    }
 
     if (createTask) {
       try {
