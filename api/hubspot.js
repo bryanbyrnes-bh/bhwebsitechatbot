@@ -57,7 +57,9 @@ async function upsertContact(contact, contactId) {
     return hubspot(`/crm/v3/objects/contacts/${encodeURIComponent(contactId)}`, 'PATCH', { properties });
   }
   try {
-    return await hubspot('/crm/v3/objects/contacts', 'POST', { properties });
+    return await hubspot('/crm/v3/objects/contacts', 'POST', {
+      properties: { ...properties, hs_lead_status: 'NEW' }
+    });
   } catch (error) {
     // HubSpot returns 409 for an email already attached to a contact.
     if (error.status !== 409 || !contact.email) throw error;
