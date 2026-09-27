@@ -452,8 +452,7 @@
 
 <script>
 const CONFIG = {
-  pricePerSqft: { low: 300, high: 400 },
-  finishMultipliers: { standard: 0.85, premium: 1.0, luxury: 1.25 }
+  pricePerSqft: { low: 300, high: 400 }
 };
 
 let conversationHistory = [];
@@ -467,6 +466,7 @@ let lastContactInfo = null;
 let chatEnded = false;
 let bookingPromptShown = false;
 let bookingUrl = null;
+let lastEstimateSqft = null;
 
 window.addEventListener('DOMContentLoaded', startChat);
 
@@ -596,6 +596,11 @@ async function processUserMessage(text) {
     if (estimateMatch) {
       try { showEstimate(JSON.parse(estimateMatch[1])); } catch(e) {}
     }
+    // Extracted contact details are the fallback when the assistant omits its display marker.
+    if (data.contactInfo?.sqft) showEstimate({
+      sqft: data.contactInfo.sqft,
+      finish: data.contactInfo.finish_level
+    });
 
     const renderMatch = fullText.match(/\[RENDER:\s*({.*?})\]/s);
     if (renderMatch) {
@@ -622,12 +627,14 @@ async function processUserMessage(text) {
 function showEstimate(params) {
   const sqft = Number(params.sqft);
   if (!Number.isFinite(sqft) || sqft < 500 || sqft > 30000) return;
-  const finish = ['standard', 'premium', 'luxury'].includes(params.finish) ? params.finish : 'premium';
-  const bedrooms = Number.isFinite(Number(params.bedrooms)) ? Number(params.bedrooms) : 3;
-  const bathrooms = Number.isFinite(Number(params.bathrooms)) ? Number(params.bathrooms) : 2;
-  const multiplier = CONFIG.finishMultipliers[finish] || 1.0;
-  const low = Math.round(sqft * CONFIG.pricePerSqft.low * multiplier);
-  const high = Math.round(sqft * CONFIG.pricePerSqft.high * multiplier);
+  if (lastEstimateSqft === sqft) return;
+  lastEstimateSqft = sqft;
+  const finish = ['standard', 'premium', 'luxury'].includes(String(params.finish).toLowerCase())
+    ? String(params.finish).toLowerCase() : '';
+  const bedrooms = Number.isFinite(Number(params.bedrooms)) && params.bedrooms !== undefined ? Number(params.bedrooms) : null;
+  const bathrooms = Number.isFinite(Number(params.bathrooms)) && params.bathrooms !== undefined ? Number(params.bathrooms) : null;
+  const low = Math.round(sqft * CONFIG.pricePerSqft.low);
+  const high = Math.round(sqft * CONFIG.pricePerSqft.high);
   const fmt = n => '$' + n.toLocaleString();
 
   const messages = document.getElementById('messages');
@@ -640,8 +647,8 @@ function showEstimate(params) {
         <div class="estimate-label">Preliminary Investment Range</div>
         <div class="estimate-range">${fmt(low)} – ${fmt(high)}</div>
         <div class="estimate-details">
-          ${sqft.toLocaleString()} sq ft · ${bedrooms} bed / ${bathrooms} bath<br>
-          ${finish.charAt(0).toUpperCase() + finish.slice(1)} finish level<br>
+          ${sqft.toLocaleString()} sq ft${bedrooms !== null && bathrooms !== null ? ` · ${bedrooms} bed / ${bathrooms} bath` : ''}<br>
+          ${finish ? `${finish.charAt(0).toUpperCase() + finish.slice(1)} finish level<br>` : ''}
           Based on $${CONFIG.pricePerSqft.low}–$${CONFIG.pricePerSqft.high}/sq ft<br>
           <em style="color:var(--neutral-500);font-size:10px;">Estimate only. Final pricing subject to site, design & specs.</em>
         </div>
