@@ -31,8 +31,8 @@ In Vercel dashboard → Your project → Settings → Environment Variables:
 | `HUBSPOT_CHAT_EVENT_PROPERTY` | Optional override; defaults to `bh_chat_inquiry_at` |
 | `CONSULTATION_BOOKING_URL` | Optional override; defaults to Melinda's verified calendar URL |
 | `RESEND_API_KEY` | Resend sending API key, stored as a Vercel Secret |
-| `LEAD_ALERT_FROM` | Verified sender such as `Breven Homes <chat@brevenhomes.com>` |
-| `LEAD_ALERT_TO` | Comma-separated verified recipient addresses for Bryan, Steven, and Melinda |
+| `LEAD_ALERT_FROM` | Verified sender such as `Breven Homes <chat@notify.brevenhomes.com>` if that sending subdomain is verified |
+| `LEAD_ALERT_TO` | Comma-separated work email addresses for Bryan, Steven, and Melinda (set in Vercel, not in GitHub) |
 
 Keys are read by the serverless functions and must never be placed in browser code.
 
