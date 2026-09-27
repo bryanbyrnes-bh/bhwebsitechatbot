@@ -28,8 +28,8 @@ In Vercel dashboard → Your project → Settings → Environment Variables:
 | `REPLICATE_API_KEY` | your r8_... key |
 | `HUBSPOT_ACCESS_TOKEN` | your pat-na1-... token |
 | `HUBSPOT_TASK_OWNER_ID` | `168491860` (Melinda Blackmon; optional default) |
-| `HUBSPOT_CHAT_EVENT_PROPERTY` | `bh_chat_inquiry_at` after creating this contact property |
-| `CONSULTATION_BOOKING_URL` | Melinda's verified HTTPS calendar link, when available |
+| `HUBSPOT_CHAT_EVENT_PROPERTY` | Optional override; defaults to `bh_chat_inquiry_at` |
+| `CONSULTATION_BOOKING_URL` | Optional override; defaults to Melinda's verified calendar URL |
 
 Keys are read by the serverless functions and must never be placed in browser code.
 
@@ -84,11 +84,11 @@ The server creates a task associated with the contact when the visitor first pro
 
 The chat transcript is saved as a single HubSpot Note associated with the contact and refreshed after each turn. **Finish chat** marks the Note completed. The browser also attempts a final update when the page closes; because browsers can interrupt that request, the last successfully saved turn remains in the Note even if the final request fails. This includes the visitor and assistant messages; AI control markers for estimates and renderings are removed. A chat without an email or phone cannot be attached to a contact.
 
-After a potential homeowner shares contact details, the chat shows a consultation action. When `CONSULTATION_BOOKING_URL` is set to a verified HTTPS scheduling page, it opens the calendar. Until then, the button becomes **Request a consultation**, records that request in the transcript Note, and leaves the follow-up task with Melinda. Do not use an inferred HubSpot meeting URL: `https://meetings.hubspot.com/melinda-blackmon` currently returns a missing-page error.
+After a potential homeowner shares contact details, the chat shows **Book a consultation**. It opens Melinda's calendar at `https://meetings-na2.hubspot.com/melinda-blackmon`, which was verified to display available times. `CONSULTATION_BOOKING_URL` can override this default if the calendar changes. If the configured URL is invalid, the button becomes **Request a consultation**, records that request in the transcript Note, and leaves the follow-up task with Melinda.
 
 To send the internal alert from HubSpot:
 
-1. Create a **contact** property with internal name `bh_chat_inquiry_at`, type **Date and time**. Set `HUBSPOT_CHAT_EVENT_PROPERTY=bh_chat_inquiry_at` in Vercel and redeploy. The code writes a fresh timestamp for each new chat inquiry.
+1. Create a **contact** property with internal name `bh_chat_inquiry_at`, type **Date and time**. The code writes a fresh timestamp for each new chat inquiry; the property name is already the code default.
 2. Create a **contact-based workflow**. Use an event enrollment trigger **Property value changed** for `bh_chat_inquiry_at`. Enable re-enrollment on this event, so an existing contact can generate another alert on a later visit. Add **Send internal email notification** addressed to the active HubSpot users Bryan Byrnes, Steven Byrnes, and Melinda Blackmon. Turn on the workflow for future enrollments. The available actions depend on your HubSpot subscription.
 3. Test with a fresh chat using a contact you control. Check the contact's property history, workflow enrollment history, the associated task, and each recipient's notification settings and inbox. Test a second visit with the same email to verify re-enrollment.
 
