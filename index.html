@@ -469,7 +469,7 @@ let bookingPromptShown = false;
 let bookingUrl = null;
 let lastEstimateSqft = null;
 const query = new URLSearchParams(window.location.search);
-const offerActive = Date.now() < Date.parse('2026-10-28T05:00:00Z');
+const offerActive = Date.now() < Date.parse('2027-01-01T06:00:00Z');
 const entryPoint = query.get('offer') === 'appliance' && offerActive ? 'appliance'
   : query.get('intent') === 'planning' ? 'planning' : 'general';
 
@@ -479,7 +479,7 @@ async function startChat() {
   const planning = entryPoint === 'planning';
   const offer = entryPoint === 'appliance';
   const greeting = offer
-    ? "For new Breven custom homes, we're offering a $10,000 appliance credit when you sign a preliminary building agreement by October 27, 2026. That first agreement begins architectural design, starts setting up allowances, and begins interior design. The credit is toward appliances for your Breven home. If you'd like to discuss the offer and your plans, what are your name, email address, and phone number?"
+    ? "For new Breven custom homes, we're offering a $10,000 appliance credit when you sign a preliminary building agreement by December 31, 2026. That first agreement begins architectural design, starts setting up allowances, and begins interior design. The credit is toward appliances for your Breven home. If you'd like to discuss the offer and your plans, what are your name, email address, and phone number?"
     : planning
     ? "We offer a complimentary homeowner planning session to talk through your ideas, the kind of home you have in mind, and the steps involved in building it. If you have a lot or one you're considering, we'll visit it with you and evaluate it together. If you're still looking for land, we're happy to meet in person and discuss potential lots. There's no charge for the session. If you'd like us to follow up, what are your name, email address, and phone number?"
     : "Welcome to Breven Homes. I'm here to help make your dream home a reality in the Texas Hill Country. What brings you here today — are you exploring building a custom home, or are you a vendor or contractor looking to connect with our team?";
