@@ -10,7 +10,12 @@ async function highLevel(path, method, body) {
     },
     body: JSON.stringify(body)
   });
-  if (!response.ok) throw new Error('HighLevel returned HTTP ' + response.status);
+  if (!response.ok) {
+    const error = new Error('HighLevel returned HTTP ' + response.status);
+    const details = await response.json().catch(() => ({}));
+    error.code = details.code;
+    throw error;
+  }
   return response.json();
 }
 
@@ -27,6 +32,26 @@ async function upsertContact(contact) {
   });
   if (!result.contact?.id) throw new Error('Missing HighLevel contact ID');
   return result.contact;
+}
+
+async function ensureSalesOpportunity(contact, contactId) {
+  const locationId = process.env.GHL_LOCATION_ID;
+  const { pipelines } = await highLevel('/opportunities/pipelines?' + new URLSearchParams({ locationId }), 'GET');
+  const matching = pipelines.filter(p => p.name.trim() === 'BH Unique Sales Process Pipeline');
+  const stages = matching.length === 1 && matching[0].stages.filter(s => s.name.trim() === '1 - Exploration Meeting');
+  if (!stages || stages.length !== 1) throw new Error('Sales pipeline or exploration stage missing or ambiguous');
+  const pipelineId = matching[0].id;
+  const query = new URLSearchParams({ location_id: locationId, pipeline_id: pipelineId, contact_id: contactId });
+  const { opportunities } = await highLevel('/opportunities/search?' + query, 'GET');
+  if (opportunities.length) return;
+  try {
+    await highLevel('/opportunities/', 'POST', {
+      locationId, pipelineId, pipelineStageId: stages[0].id, contactId, status: 'open',
+      name: [contact.firstname, contact.lastname].filter(Boolean).join(' ') || contact.email || contact.phone
+    });
+  } catch (error) {
+    if (error.code !== 'OPPORTUNITY_NO_DUPLICATE') throw error;
+  }
 }
 
 function projectDetails(contact, entryPoint) {
@@ -163,6 +188,16 @@ export default async function handler(req, res) {
 
     // The contact note records each inquiry and its creation time.
     followUp.inquiryRecorded = Boolean(recordInquiry && followUp.noteSaved);
+
+    if (req.body.ensureOpportunity !== false && ['Realtor', 'Potential Homeowner'].includes(contact.contact_type)) {
+      try {
+        await ensureSalesOpportunity(contact, saved.id);
+        followUp.opportunitySaved = true;
+      } catch (error) {
+        console.error('HighLevel opportunity failed:', error.message);
+        followUp.errors.push('Sales opportunity save failed');
+      }
+    }
 
     if (sendAlert) {
       try {

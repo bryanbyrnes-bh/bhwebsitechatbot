@@ -459,6 +459,7 @@ const CONFIG = {
 let conversationHistory = [];
 let isTyping = false;
 let hubspotContactId = null;
+let opportunityContactId = null;
 let followUpTaskCreated = false;
 let inquiryRecorded = false;
 let alertSent = false;
@@ -726,6 +727,7 @@ async function saveToHubSpot(contact, finalized = false) {
         contact,
         entryPoint,
         contactId: hubspotContactId,
+        ensureOpportunity: !opportunityContactId || opportunityContactId !== hubspotContactId,
         createTask: !followUpTaskCreated,
         recordInquiry: !inquiryRecorded,
         sendAlert: !alertSent,
@@ -737,6 +739,7 @@ async function saveToHubSpot(contact, finalized = false) {
     const data = await response.json();
     if (!response.ok || !data.success) throw new Error(data.error || 'HubSpot save failed');
     hubspotContactId = data.id;
+    if (data.followUp?.opportunitySaved) opportunityContactId = data.id;
     lastContactInfo = contact;
     followUpTaskCreated ||= Boolean(data.followUp?.taskCreated);
     inquiryRecorded ||= Boolean(data.followUp?.inquiryRecorded);
@@ -811,6 +814,7 @@ window.addEventListener('pagehide', () => {
       noteId: transcriptNoteId,
       messages: conversationHistory,
       finalized: true,
+      ensureOpportunity: opportunityContactId !== hubspotContactId,
       createTask: false,
       recordInquiry: false,
       sendAlert: false
