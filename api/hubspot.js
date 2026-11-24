@@ -47,6 +47,7 @@ async function ensureSalesOpportunity(contact, contactId) {
   try {
     await highLevel('/opportunities/', 'POST', {
       locationId, pipelineId, pipelineStageId: stages[0].id, contactId, status: 'open',
+      assignedTo: process.env.GHL_OPPORTUNITY_OWNER_ID,
       name: 'Website Chatbot - ' + ([contact.firstname, contact.lastname].filter(Boolean).join(' ') || contact.email || contact.phone)
     });
   } catch (error) {
