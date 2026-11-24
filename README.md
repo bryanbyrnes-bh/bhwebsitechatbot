@@ -29,7 +29,7 @@ In Vercel dashboard → Your project → Settings → Environment Variables:
 | `HUBSPOT_ACCESS_TOKEN` | your pat-na1-... token |
 | `HUBSPOT_TASK_OWNER_ID` | `168491860` (Melinda Blackmon; optional default) |
 | `HUBSPOT_CHAT_EVENT_PROPERTY` | Optional override; defaults to `bh_chat_inquiry_at` |
-| `CONSULTATION_BOOKING_URL` | Optional override; defaults to Melinda's verified calendar URL |
+| `GHL_BOOKING_URL` | Optional override; defaults to the Breven Homes HighLevel booking URL |
 | `RESEND_API_KEY` | Resend sending API key, stored as a Vercel Secret |
 | `LEAD_ALERT_FROM` | Verified sender such as `Breven Homes <chat@notify.brevenhomes.com>` if that sending subdomain is verified |
 | `LEAD_ALERT_TO` | Comma-separated work email addresses for Bryan, Steven, and Melinda (set in Vercel, not in GitHub) |
@@ -87,7 +87,7 @@ The server creates a task associated with the contact when the visitor first pro
 
 The chat transcript is saved as a single HubSpot Note associated with the contact and refreshed after each turn. **Finish chat** marks the Note completed. The browser also attempts a final update when the page closes; because browsers can interrupt that request, the last successfully saved turn remains in the Note even if the final request fails. This includes the visitor and assistant messages; AI control markers for estimates and renderings are removed. A chat without an email or phone cannot be attached to a contact.
 
-After a potential homeowner shares contact details, the chat shows **Book a consultation**. It opens Melinda's calendar at `https://meetings-na2.hubspot.com/melinda-blackmon`, which was verified to display available times. `CONSULTATION_BOOKING_URL` can override this default if the calendar changes. If the configured URL is invalid, the button becomes **Request a consultation**, records that request in the transcript Note, and leaves the follow-up task with Melinda.
+After a potential homeowner shares contact details, the chat shows **Book a consultation**. It opens the Breven Homes HighLevel calendar at `https://api.leadconnectorhq.com/widget/booking/esvy40TRqXyK4kuMBaq2`. `GHL_BOOKING_URL` can override this default if the calendar changes. If the configured URL is invalid, the button becomes **Request a consultation**, records that request in the transcript Note, and leaves the follow-up task with Melinda.
 
 ### Email alerts without a paid HubSpot workflow
 
