@@ -1,111 +1,58 @@
-const HUBSPOT = 'https://api.hubapi.com';
-const CONTACT_TYPES = new Set(['Potential Homeowner', 'Realtor', 'Contractor', 'Breven Homeowner']);
+import { createHmac } from 'node:crypto';
 
-async function hubspot(path, method, body) {
-  const response = await fetch(`${HUBSPOT}${path}`, {
+async function highLevel(path, method, body) {
+  const response = await fetch('https://services.leadconnectorhq.com' + path, {
     method,
     headers: {
-      Authorization: `Bearer ${process.env.HUBSPOT_ACCESS_TOKEN}`,
+      Authorization: 'Bearer ' + process.env.GHL_PRIVATE_INTEGRATION_TOKEN,
+      Version: '2021-07-28',
       'Content-Type': 'application/json'
     },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) })
+    body: JSON.stringify(body)
   });
-  const data = await response.json().catch(() => ({}));
-  if (!response.ok) {
-    const error = new Error(data.message || `HubSpot returned ${response.status}`);
-    error.status = response.status;
-    error.data = data;
-    throw error;
-  }
-  return data;
+  if (!response.ok) throw new Error('HighLevel returned HTTP ' + response.status);
+  return response.json();
 }
 
-function contactProperties(contact) {
-  // Omitting unknown fields prevents a later chat turn from erasing CRM data.
-  const source = {
-    firstname: contact.firstname,
-    lastname: contact.lastname,
-    email: contact.email,
-    phone: contact.phone,
-    contact_type: CONTACT_TYPES.has(contact.contact_type) ? contact.contact_type : undefined,
-    city: contact.location,
-    desired_location: contact.location,
-    square_footage: contact.sqft ? Number(contact.sqft) : undefined,
-    finish_level: contact.finish_level,
-    build_timeline: contact.timeline,
-    project_notes: contact.notes
+async function upsertContact(contact) {
+  const fields = {
+    firstName: contact.firstname, lastName: contact.lastname,
+    email: contact.email, phone: contact.phone
   };
-  return Object.fromEntries(Object.entries(source).filter(([, value]) =>
-    value !== undefined && value !== null && value !== '' &&
-    (typeof value !== 'number' || Number.isFinite(value))
+  const payload = Object.fromEntries(Object.entries(fields).filter(([, value]) =>
+    typeof value === 'string' && value.trim()
   ));
+  const result = await highLevel('/contacts/upsert', 'POST', {
+    ...payload, locationId: process.env.GHL_LOCATION_ID, source: 'Breven Homes website chatbot'
+  });
+  if (!result.contact?.id) throw new Error('Missing HighLevel contact ID');
+  return result.contact;
 }
 
-async function upsertContact(contact, contactId) {
-  const properties = contactProperties(contact);
-  if (contactId) {
-    const existing = await hubspot(
-      `/crm/v3/objects/contacts/${encodeURIComponent(contactId)}?properties=email,phone`, 'GET'
-    );
-    const sameEmail = contact.email && existing.properties?.email?.toLowerCase() === contact.email.toLowerCase();
-    const samePhone = contact.phone && existing.properties?.phone === contact.phone;
-    if (!sameEmail && !samePhone) {
-      const error = new Error('Contact ID does not match the supplied contact details');
-      error.status = 400;
-      throw error;
-    }
-    return hubspot(`/crm/v3/objects/contacts/${encodeURIComponent(contactId)}`, 'PATCH', { properties });
-  }
-  try {
-    return await hubspot('/crm/v3/objects/contacts', 'POST', {
-      properties: { ...properties, hs_lead_status: 'NEW' }
-    });
-  } catch (error) {
-    // HubSpot returns 409 for an email already attached to a contact.
-    if (error.status !== 409 || !contact.email) throw error;
-    return hubspot(
-      `/crm/v3/objects/contacts/${encodeURIComponent(contact.email)}?idProperty=email`,
-      'PATCH', { properties }
-    );
-  }
+function projectDetails(contact, entryPoint) {
+  return [
+    entryPoint === 'planning' && 'Complimentary Homeowner Planning Session',
+    ...Object.entries({
+      'Contact type': contact.contact_type, 'Build location': contact.location,
+      'Square footage': contact.sqft, 'Finish level': contact.finish_level,
+      'Timeline': contact.timeline, 'Project details': contact.notes
+    }).filter(([, value]) => value).map(([key, value]) => key + ': ' + value)
+  ].filter(Boolean).join('\n');
 }
 
 async function createFollowUp(contact, contactId, entryPoint) {
-  const association = await hubspot('/crm/v4/associations/tasks/contacts/labels', 'GET');
-  const defaultType = association.results?.find(item => item.category === 'HUBSPOT_DEFINED' && item.label === null);
-  if (!defaultType) throw new Error('HubSpot task-to-contact association was not found');
-
   const name = [contact.firstname, contact.lastname].filter(Boolean).join(' ') || contact.email || contact.phone;
-  const details = [
-    `Source: Breven Homes website chatbot`,
-    entryPoint === 'planning' && 'Inquiry: Complimentary Homeowner Planning Session',
-    `Type: ${contact.contact_type || 'Unknown'}`,
-    `Name: ${name}`,
-    `Email: ${contact.email || 'Not provided'}`,
-    `Phone: ${contact.phone || 'Not provided'}`,
-    contact.location && `Location: ${contact.location}`,
-    contact.sqft && `Square footage: ${contact.sqft}`,
-    contact.finish_level && `Finish level: ${contact.finish_level}`,
-    contact.timeline && `Timeline: ${contact.timeline}`,
-    contact.notes && `Project details: ${contact.notes}`
-  ].filter(Boolean).join('\n');
-
-  return hubspot('/crm/v3/objects/tasks', 'POST', {
-    properties: {
-      hs_timestamp: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-      hs_task_subject: `Follow up: ${entryPoint === 'planning' ? 'planning session' : 'website chat'} — ${name}`,
-      hs_task_body: details,
-      hs_task_status: 'NOT_STARTED',
-      hubspot_owner_id: process.env.HUBSPOT_TASK_OWNER_ID || '168491860'
-    },
-    associations: [{
-      to: { id: contactId },
-      types: [{ associationCategory: defaultType.category, associationTypeId: defaultType.typeId }]
-    }]
+  const result = await highLevel('/contacts/' + encodeURIComponent(contactId) + '/tasks', 'POST', {
+    title: 'Follow up: ' + (entryPoint === 'planning' ? 'planning session' : 'website chat') + ' — ' + name,
+    body: projectDetails(contact, entryPoint), completed: false,
+    dueDate: new Date(Date.now() + 86400000).toISOString(),
+    assignedTo: process.env.GHL_TASK_OWNER_ID || undefined
   });
+  if (!result.task?.id) throw new Error('Missing HighLevel task ID');
+  return result.task;
 }
 
-function noteBody(messages, finalized) {
+function noteBody(messages, finalized, details) {
   if (!Array.isArray(messages) || messages.length > 150) throw new Error('Invalid chat transcript');
   const lines = messages.map(message => {
     if (!['user', 'assistant'].includes(message?.role) || typeof message.content !== 'string') {
@@ -120,26 +67,27 @@ function noteBody(messages, finalized) {
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
   })[char]);
   return `<strong>Website chat transcript${finalized ? ' — completed' : ' — in progress'}</strong><br><br>` +
-    escape(text).replace(/\n/g, '<br>');
+    escape([details, text].filter(Boolean).join('\n\n')).replace(/\n/g, '<br>');
 }
 
-async function saveTranscript(messages, contactId, noteId, finalized) {
-  const properties = { hs_note_body: noteBody(messages, finalized) };
+function noteSignature(contactId, id) {
+  return createHmac('sha256', process.env.GHL_PRIVATE_INTEGRATION_TOKEN)
+    .update(JSON.stringify([contactId, id])).digest('hex');
+}
+
+async function saveTranscript(messages, contactId, noteId, finalized, details) {
+  const path = '/contacts/' + encodeURIComponent(contactId) + '/notes';
+  const body = { body: noteBody(messages, finalized, details) };
   if (noteId) {
-    const note = await hubspot(
-      `/crm/v3/objects/notes/${encodeURIComponent(noteId)}?associations=contacts`, 'GET'
-    );
-    const linked = note.associations?.contacts?.results?.some(item => String(item.id) === String(contactId));
-    if (!linked) throw new Error('Transcript note is not linked to the contact');
-    return hubspot(`/crm/v3/objects/notes/${encodeURIComponent(noteId)}`, 'PATCH', { properties });
+    const [id, signature] = String(noteId).split('.');
+    if (!id || signature !== noteSignature(contactId, id)) throw new Error('Invalid transcript reference');
+    await highLevel(path + '/' + encodeURIComponent(id), 'PUT', body);
+    return { id: noteId };
   }
-  return hubspot('/crm/v3/objects/notes', 'POST', {
-    properties: { ...properties, hs_timestamp: new Date().toISOString() },
-    associations: [{
-      to: { id: contactId },
-      types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: 202 }]
-    }]
-  });
+  const result = await highLevel(path, 'POST', body);
+  const id = result.note?.id;
+  if (!id) throw new Error('Missing HighLevel note ID');
+  return { id: id + '.' + noteSignature(contactId, id) };
 }
 
 async function sendLeadAlert(contact, contactId, entryPoint) {
@@ -158,7 +106,7 @@ async function sendLeadAlert(contact, contactId, entryPoint) {
     contact.location && `Location: ${contact.location}`,
     contact.sqft && `Square footage: ${contact.sqft}`,
     contact.timeline && `Timeline: ${contact.timeline}`,
-    `HubSpot contact: https://app.hubspot.com/contacts/245159698/record/0-1/${encodeURIComponent(contactId)}`
+    `HighLevel contact: https://app.gohighlevel.com/v2/location/${encodeURIComponent(process.env.GHL_LOCATION_ID)}/contacts/detail/${encodeURIComponent(contactId)}`
   ].filter(Boolean);
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
@@ -180,24 +128,24 @@ async function sendLeadAlert(contact, contactId, entryPoint) {
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
-  if (!process.env.HUBSPOT_ACCESS_TOKEN) return res.status(500).json({ error: 'HubSpot is not configured' });
+  if (!process.env.GHL_PRIVATE_INTEGRATION_TOKEN || !process.env.GHL_LOCATION_ID) return res.status(500).json({ error: 'HighLevel is not configured' });
 
-  const { contact, contactId, createTask, recordInquiry, sendAlert, messages, noteId, finalized, entryPoint } = req.body || {};
+  const { contact, createTask, recordInquiry, sendAlert, messages, noteId, finalized, entryPoint } = req.body || {};
   const email = typeof contact?.email === 'string' ? contact.email.trim() : '';
   const phone = typeof contact?.phone === 'string' ? contact.phone.trim() : '';
   if (!email && !phone) return res.status(400).json({ error: 'Email or phone is required' });
 
   try {
-    const saved = await upsertContact({ ...contact, email, phone }, contactId);
+    const saved = await upsertContact({ ...contact, email, phone });
     const followUp = { taskCreated: false, inquiryRecorded: false, alertSent: false, noteSaved: false, errors: [] };
 
     if (Array.isArray(messages) && messages.length) {
       try {
-        const note = await saveTranscript(messages, saved.id, noteId, Boolean(finalized));
+        const note = await saveTranscript(messages, saved.id, noteId, Boolean(finalized), projectDetails(contact, entryPoint));
         followUp.noteSaved = true;
         followUp.noteId = note.id;
       } catch (error) {
-        console.error('HubSpot transcript note failed:', error);
+        console.error('HighLevel transcript note failed:', error);
         followUp.errors.push('Transcript note save failed');
       }
     }
@@ -208,27 +156,13 @@ export default async function handler(req, res) {
         followUp.taskCreated = true;
         followUp.taskId = task.id;
       } catch (error) {
-        console.error('HubSpot task creation failed:', error);
+        console.error('HighLevel task creation failed:', error);
         followUp.errors.push('Task creation failed');
       }
     }
 
-    if (recordInquiry) {
-      const property = process.env.HUBSPOT_CHAT_EVENT_PROPERTY || 'bh_chat_inquiry_at';
-      if (!property || !/^[a-z][a-z0-9_]*$/.test(property)) {
-        followUp.errors.push('HubSpot chat inquiry property is not configured');
-      } else {
-        try {
-          await hubspot(`/crm/v3/objects/contacts/${saved.id}`, 'PATCH', {
-            properties: { [property]: new Date().toISOString() }
-          });
-          followUp.inquiryRecorded = true;
-        } catch (error) {
-          console.error('HubSpot inquiry timestamp update failed:', error);
-          followUp.errors.push('Inquiry timestamp update failed');
-        }
-      }
-    }
+    // The contact note records each inquiry and its creation time.
+    followUp.inquiryRecorded = Boolean(recordInquiry && followUp.noteSaved);
 
     if (sendAlert) {
       try {
@@ -243,7 +177,7 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ success: true, id: saved.id, followUp });
   } catch (error) {
-    console.error('HubSpot contact save failed:', error);
+    console.error('HighLevel contact save failed:', error);
     return res.status(error.status >= 400 && error.status < 500 ? error.status : 502)
       .json({ success: false, error: 'Contact could not be saved' });
   }
