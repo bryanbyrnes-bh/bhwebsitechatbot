@@ -47,7 +47,7 @@ async function ensureSalesOpportunity(contact, contactId) {
   try {
     await highLevel('/opportunities/', 'POST', {
       locationId, pipelineId, pipelineStageId: stages[0].id, contactId, status: 'open',
-      name: [contact.firstname, contact.lastname].filter(Boolean).join(' ') || contact.email || contact.phone
+      name: 'Website Chatbot - ' + ([contact.firstname, contact.lastname].filter(Boolean).join(' ') || contact.email || contact.phone)
     });
   } catch (error) {
     if (error.code !== 'OPPORTUNITY_NO_DUPLICATE') throw error;
